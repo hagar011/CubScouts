@@ -1,0 +1,91 @@
+rules_version = '2';
+
+service cloud.firestore {
+match /databases/{database}/documents {
+
+function isSignedIn() {
+  return request.auth != null;
+}
+
+function userEmail() {
+  return request.auth.token.email.lower();
+}
+
+function isLeader() {
+  return isSignedIn() && (
+    userEmail() == 'scout2026@gmail.com' ||
+    userEmail() == 'hagar01124@gmail.com'
+  );
+}
+
+match /users/{userId} {
+  allow read, write: if isLeader() || (isSignedIn() && request.auth.uid == userId);
+}
+
+match /cubs/{cubId} {
+  allow read: if isSignedIn();
+  allow create, update, delete: if isLeader() || (isSignedIn() && request.auth.uid == cubId);
+}
+
+match /scouts/{scoutId} {
+  allow read: if isSignedIn();
+  allow create, update, delete: if isLeader() || (isSignedIn() && request.auth.uid == scoutId);
+}
+
+match /pending_cubs/{cubId} {
+  allow read: if isLeader() || (isSignedIn() && request.auth.uid == cubId);
+  allow create: if isSignedIn();
+  allow update, delete: if isLeader() || (isSignedIn() && request.auth.uid == cubId);
+}
+
+match /pendingPoints/{pointId} {
+  allow read: if isLeader() || (isSignedIn() && resource.data.cubId == request.auth.uid);
+  allow create: if isSignedIn() && (
+    isLeader() ||
+    request.resource.data.cubId == request.auth.uid
+  );
+  allow update, delete: if isLeader();
+}
+
+match /meetings/{meetingId} {
+  allow read: if isSignedIn();
+  allow create, update, delete: if isLeader();
+}
+
+match /sextets/{sextetId} {
+  allow read: if isSignedIn();
+  allow create, update, delete: if isLeader();
+}
+
+match /sixes/{sixId} {
+  allow read: if isSignedIn();
+  allow create, update, delete: if isLeader();
+}
+
+match /settings/global {
+  allow read: if isSignedIn();
+  allow create, update, delete: if isLeader();
+}
+
+match /globalTasks/{taskId} {
+  allow read: if isSignedIn();
+  allow create, update, delete: if isLeader();
+}
+
+match /leaders/{leaderId} {
+  allow read: if isSignedIn();
+  allow create, update, delete: if isLeader();
+}
+
+match /safety_reports/{reportId} {
+  allow read: if isLeader();
+  allow create: if isSignedIn();
+  allow update, delete: if isLeader();
+}
+
+match /{document=**} {
+  allow read, write: if false;
+}
+
+}
+}

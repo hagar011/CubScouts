@@ -1,0 +1,156 @@
+{
+  "entities": {
+    "Cub": {
+      "title": "Cub",
+      "description": "A cub scout profile",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "age": { "type": "number" },
+        "phone": { "type": "string" },
+        "pin": { "type": "string" },
+        "avatar": { "type": "string" },
+        "level": { "type": "string" },
+        "sextetId": { "type": "string" },
+        "evaluation": { "$ref": "EvaluationCriteria" },
+        "conduct": { "$ref": "ConductCriteria" },
+        "requirements": { "type": "array" },
+        "history": { "type": "array" },
+        "badges": { "type": "array" },
+        "lastChecked": { "type": "string" },
+        "points": { "type": "number" },
+        "unlockedStories": { "type": "array" }
+      },
+      "required": ["id", "name", "age", "level", "points"]
+    },
+    "Meeting": {
+      "title": "Meeting",
+      "description": "A scouting meeting",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "date": { "type": "string" },
+        "title": { "type": "string" },
+        "attendees": { "type": "array" },
+        "notes": { "type": "string" }
+      },
+      "required": ["id", "date", "title", "attendees"]
+    },
+    "Sextet": {
+      "title": "Sextet",
+      "description": "A small group of scouts",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "color": { "type": "string" },
+        "points": { "type": "number" },
+        "motto": { "type": "string" }
+      },
+      "required": ["id", "name", "points"]
+    },
+    "GlobalSettings": {
+      "title": "GlobalSettings",
+      "description": "Global app configuration",
+      "type": "object",
+      "properties": {
+        "gamesLocked": { "type": "boolean" },
+        "attendance": { "type": "object" },
+        "leaderPin": { "type": "string" }
+      }
+    },
+    "PendingPoint": {
+      "title": "PendingPoint",
+      "description": "A point request from a cub or parent task",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "cubId": { "type": "string" },
+        "taskName": { "type": "string" },
+        "type": { "type": "string", "enum": ["parent_task"] },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "createdAt": { "type": "string" },
+        "points": { "type": "number" }
+      },
+      "required": ["id", "cubId", "taskName", "status", "points"]
+    },
+    "GlobalTask": {
+      "title": "GlobalTask",
+      "description": "A task sent by the leader to all cubs",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "text": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "active": { "type": "boolean" }
+      },
+      "required": ["id", "text", "createdAt", "active"]
+    },
+    "Leader": {
+      "title": "Leader",
+      "description": "A leader profile",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "roleTitle": { "type": "string" },
+        "avatar": { "type": "string" },
+        "experienceYears": { "type": "number" },
+        "badges": { "type": "array" }
+      },
+      "required": ["id", "name", "roleTitle", "experienceYears"]
+    },
+    "UserSession": {
+      "title": "UserSession",
+      "description": "User preferences and role session state",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string" },
+        "activeCubId": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["uid", "email"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserSession",
+      "description": "User preferences, saved roles, and state synced on cloud"
+    },
+    "/cubs/{cubId}": {
+      "schema": "Cub",
+      "description": "Scout profiles"
+    },
+    "/pending_cubs/{cubId}": {
+      "schema": "Cub",
+      "description": "Pending scout approval requests"
+    },
+    "/meetings/{meetingId}": {
+      "schema": "Meeting",
+      "description": "Scout meetings"
+    },
+    "/sextets/{sextetId}": {
+      "schema": "Sextet",
+      "description": "Sextet data"
+    },
+    "/settings/global": {
+      "schema": "GlobalSettings",
+      "description": "Global settings and current attendance"
+    },
+    "/pendingPoints/{pointId}": {
+      "schema": "PendingPoint",
+      "description": "Point approval requests"
+    },
+    "/globalTasks/{taskId}": {
+      "schema": "GlobalTask",
+      "description": "Tasks sent by leaders to all parents"
+    },
+    "/leaders/{leaderId}": {
+      "schema": "Leader",
+      "description": "Leader profiles and awarded leadership badges"
+    }
+  }
+}

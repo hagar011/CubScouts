@@ -1,0 +1,383 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ═════════════════════════════════════════════════════════════
+    // دوال مساعدة
+    // ═════════════════════════════════════════════════════════════
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    // قائمة القادة. عدّلها هنا وفي src/utils/security.ts (وscoutHelpers.ts) معاً.
+    // مهم: تأكد أن الإيميلين مسجّلان فعلاً في Firebase Authentication،
+    // وإلا يستطيع أي شخص التسجيل بهما. وبعد أن يؤكد القادة بريدهم يمكن إضافة:
+    //   && request.auth.token.email_verified == true
+    function isLeader() {
+      return isSignedIn()
+        && 'email' in request.auth.token
+        && request.auth.token.email.lower() in [
+          'scout2026@gmail.com',
+          'hagar01124@gmail.com'
+        ];
+    }
+
+    // الحقول التي تغيّرت في عملية التحديث
+    function changedKeys() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
+    // ولي الأمر "المعتمد" لشبل = مستند علاقة معرّفه parentUid_cubUid وحالته approved.
+    // لا يستطيع أحد إنشاء هذا المستند إلا عبر كود ربط صالح (انظر validRelationshipCreate).
+    function isApprovedParentOf(cubUid) {
+      return isSignedIn()
+        && get(/databases/$(database)/documents/parentCubRelationships/$(request.auth.uid + '_' + cubUid)).data.status == 'approved';
+    }
+
+    // ═════════════════════════════════════════════════════════════
+    // كود الربط
+    // ═════════════════════════════════════════════════════════════
+
+    function validNewCode(code) {
+      let d = request.resource.data;
+      return isSignedIn()
+        && code.matches('^CUB-[A-Z0-9]{4}-[A-Z0-9]{4}$')
+        && d.keys().hasOnly([
+             'code', 'cubUid', 'cubName', 'cubAvatar', 'status', 'createdBy',
+             'createdAt', 'expiresAt', 'requiresApproval'
+           ])
+        && d.code == code
+        && d.status == 'active'
+        && d.createdBy == request.auth.uid
+        && d.createdAt == request.time
+        && d.expiresAt > request.time
+        && d.expiresAt <= request.time + duration.value(45, 'm')
+        && d.requiresApproval is bool
+        && (
+          // القائد يصدر كوداً لأي شبل (ومنهم من ليس له حساب)
+          isLeader()
+          ||
+          // الشبل يصدر كوداً لنفسه فقط، واسمه يجب أن يطابق ملفه
+          (
+            d.cubUid == request.auth.uid
+            && d.cubName == get(/databases/$(database)/documents/cubs/$(request.auth.uid)).data.name
+          )
+        );
+    }
+
+    // استهلاك الكود: لا يتم إلا إذا أُنشئت العلاقة المقابلة في نفس العملية (batch)
+    function validCodeConsume(code) {
+      let d = request.resource.data;
+      return isSignedIn()
+        && resource.data.status == 'active'
+        && resource.data.expiresAt > request.time
+        && changedKeys().hasOnly(['status', 'usedBy', 'usedAt'])
+        && d.status == 'used'
+        && d.usedBy == request.auth.uid
+        && d.usedAt == request.time
+        && existsAfter(/databases/$(database)/documents/parentCubRelationships/$(request.auth.uid + '_' + resource.data.cubUid))
+        && getAfter(/databases/$(database)/documents/parentCubRelationships/$(request.auth.uid + '_' + resource.data.cubUid)).data.viaCode == code;
+    }
+
+    // ═════════════════════════════════════════════════════════════
+    // العلاقة بين ولي الأمر والشبل
+    // ═════════════════════════════════════════════════════════════
+
+    function validRelationshipCreate(relId) {
+      let d = request.resource.data;
+      let codePath = /databases/$(database)/documents/linkCodes/$(d.viaCode);
+      let c = get(codePath).data;
+      let usedAfter = getAfter(codePath).data;
+      return isSignedIn()
+        && relId == d.parentUid + '_' + d.cubUid
+        && d.parentUid == request.auth.uid
+        && d.cubUid != d.parentUid
+        && d.createdBy == request.auth.uid
+        && d.createdAt == request.time
+        && d.relationship in ['father', 'mother', 'guardian']
+        && d.keys().hasOnly([
+             'parentUid', 'cubUid', 'relationship', 'status', 'createdBy', 'createdAt',
+             'approvedAt', 'approvedBy', 'viaCode', 'parentName', 'cubName', 'cubAvatar',
+             'expiresAt'
+           ])
+        // الكود صالح ويخص هذا الشبل بالذات
+        && c.status == 'active'
+        && c.expiresAt > request.time
+        && c.cubUid == d.cubUid
+        && d.cubName == c.cubName
+        && d.get('cubAvatar', '') == c.get('cubAvatar', '')
+        // وقد استُهلك في نفس العملية بواسطة ولي الأمر نفسه
+        && usedAfter.status == 'used'
+        && usedAfter.usedBy == request.auth.uid
+        && (
+          // كود لا يحتاج موافقة: موافقة الشبل/القائد مضمّنة في إصداره للكود
+          (
+            c.requiresApproval == false
+            && d.status == 'approved'
+            && d.approvedAt == request.time
+            && d.approvedBy == c.createdBy
+            && !('expiresAt' in d)
+          )
+          ||
+          // كود يحتاج موافقة: يبدأ الطلب "معلّقاً" بمهلة قصيرة
+          (
+            c.requiresApproval == true
+            && d.status == 'pending'
+            && d.expiresAt > request.time
+            && d.expiresAt <= request.time + duration.value(8, 'd')
+            && !('approvedAt' in d)
+            && !('approvedBy' in d)
+          )
+        );
+    }
+
+    // الشبل صاحب الطلب يقبل أو يرفض طلباً معلّقاً لم تنتهِ مهلته
+    function validCubResponse() {
+      let d = request.resource.data;
+      return isSignedIn()
+        && resource.data.cubUid == request.auth.uid
+        && resource.data.status == 'pending'
+        && resource.data.expiresAt > request.time
+        && changedKeys().hasOnly(['status', 'approvedAt', 'approvedBy', 'rejectedAt'])
+        && (
+          (d.status == 'approved' && d.approvedBy == request.auth.uid && d.approvedAt == request.time)
+          ||
+          (d.status == 'rejected' && d.rejectedAt == request.time)
+        );
+    }
+
+    // ═════════════════════════════════════════════════════════════
+    // ملف الشبل الجديد لا يجوز أن يبدأ بنقاط أو أوسمة أو ترقيات
+    // ═════════════════════════════════════════════════════════════
+
+    function validNewCub(cubId) {
+      let d = request.resource.data;
+      return d.id == cubId
+        && d.points == 0
+        && d.badges.size() == 0
+        && d.get('gamesTotalPoints', 0) == 0
+        && d.get('currentStep', 1) == 1
+        && d.get('approvedPromotionSteps', []).size() == 0
+        && d.get('unlockedStories', []).size() == 0
+        && !('pendingPromotionStep' in d)
+        && !('pendingHomeChallenge' in d);
+    }
+
+    // طلب نقاط صالح: من الشبل نفسه، أو من ولي أمر معتمد لهذا الشبل
+    function validPointRequest(pointId) {
+      let d = request.resource.data;
+      return isSignedIn()
+        && d.id == pointId
+        && d.status == 'pending'
+        && d.points is number
+        && d.points > 0
+        && d.points <= 50
+        && d.keys().hasOnly([
+             'id', 'cubId', 'points', 'reason', 'taskName', 'type',
+             'status', 'createdAt', 'parentUid', 'parentEmail'
+           ])
+        && (
+          (d.cubId == request.auth.uid && !('parentUid' in d))
+          ||
+          (
+            d.get('type', '') == 'parent_task'
+            && d.get('parentUid', '') == request.auth.uid
+            && isApprovedParentOf(d.cubId)
+          )
+        );
+    }
+
+    // ═════════════════════════════════════════════════════════════
+    // المستخدمون: كل شخص يرى ملفه فقط، والقائد يرى الجميع
+    // ═════════════════════════════════════════════════════════════
+
+    match /users/{userId} {
+      allow read: if isLeader() || isOwner(userId);
+
+      // المستخدم لا يستطيع أن يجعل نفسه قائداً
+      allow create: if isLeader() || (
+        isOwner(userId)
+        && request.resource.data.get('role', 'cub') in ['cub', 'parent', '']
+        && request.resource.data.keys().hasOnly([
+             'uid', 'email', 'displayName', 'photoURL', 'role', 'phone', 'approved',
+             'createdAt', 'updatedAt', 'age', 'stage'
+           ])
+      );
+
+      allow update: if isLeader() || (
+        isOwner(userId)
+        && request.resource.data.get('role', 'cub') in ['cub', 'parent', '']
+        && changedKeys().hasOnly([
+             'uid', 'email', 'displayName', 'photoURL', 'role', 'phone', 'approved',
+             'createdAt', 'updatedAt', 'age', 'stage'
+           ])
+      );
+
+      allow delete: if isLeader();
+    }
+
+    // ═════════════════════════════════════════════════════════════
+    // أكواد الربط
+    // ═════════════════════════════════════════════════════════════
+
+    match /linkCodes/{code} {
+      // قراءة مستند واحد فقط لمن يعرف الكود (السر هو الكود نفسه). لا يوجد بحث عام.
+      allow get: if isSignedIn();
+
+      // من أنشأ الأكواد يرى أكواده فقط
+      allow list: if isLeader() || (isSignedIn() && resource.data.createdBy == request.auth.uid);
+
+      allow create: if validNewCode(code);
+
+      allow update: if isLeader()
+        || (
+          // المُصدِر يلغي كوده فقط
+          isSignedIn()
+          && resource.data.createdBy == request.auth.uid
+          && changedKeys().hasOnly(['status'])
+          && request.resource.data.status == 'revoked'
+        )
+        || validCodeConsume(code);
+
+      allow delete: if isLeader()
+        || (isSignedIn() && resource.data.createdBy == request.auth.uid);
+    }
+
+    // ═════════════════════════════════════════════════════════════
+    // العلاقات: لا يمكن إنشاؤها إلا بكود صالح، ولا يمكن تزويرها من الواجهة
+    // ═════════════════════════════════════════════════════════════
+
+    match /parentCubRelationships/{relId} {
+      allow read: if isLeader() || (
+        isSignedIn() && (
+          resource.data.parentUid == request.auth.uid
+          || resource.data.cubUid == request.auth.uid
+        )
+      );
+
+      allow create: if validRelationshipCreate(relId);
+
+      // الشبل يقبل/يرفض الطلبات الموجهة له، والقائد يستطيع المعالجة أيضاً
+      allow update: if isLeader() || validCubResponse();
+
+      // أي طرف (ولي الأمر أو الشبل أو القائد) يستطيع إزالة العلاقة
+      allow delete: if isLeader() || (
+        isSignedIn() && (
+          resource.data.parentUid == request.auth.uid
+          || resource.data.cubUid == request.auth.uid
+        )
+      );
+    }
+
+    // ═════════════════════════════════════════════════════════════
+    // الأشبال: القراءة للقائد وللشبل نفسه ولولي الأمر المعتمد فقط
+    // ═════════════════════════════════════════════════════════════
+
+    match /cubs/{cubId} {
+      allow read: if isLeader() || isOwner(cubId) || isApprovedParentOf(cubId);
+
+      allow create: if isLeader() || (isOwner(cubId) && validNewCub(cubId));
+
+      // الشبل يعدّل اسمه وصورته وهاتفه وقراءة إشعاراته فقط.
+      // النقاط والأوسمة والمرحلة والترقية للقائد وحده. وولي الأمر للقراءة فقط.
+      allow update: if isLeader() || (
+        isOwner(cubId)
+        && changedKeys().hasOnly(['name', 'avatar', 'phone', 'notifications'])
+      );
+
+      allow delete: if isLeader();
+    }
+
+    match /scouts/{scoutId} {
+      allow read: if isLeader() || isOwner(scoutId);
+
+      allow create: if isLeader() || (
+        isOwner(scoutId)
+        && request.resource.data.get('points', 0) == 0
+        && request.resource.data.get('badges', []).size() == 0
+      );
+
+      allow update: if isLeader() || (
+        isOwner(scoutId)
+        && changedKeys().hasOnly(['name', 'avatar', 'phone'])
+      );
+
+      allow delete: if isLeader();
+    }
+
+    match /pending_cubs/{cubId} {
+      allow read: if isLeader() || isOwner(cubId);
+      allow create: if isLeader() || (isOwner(cubId) && validNewCub(cubId));
+      allow update, delete: if isLeader();
+    }
+
+    // ═════════════════════════════════════════════════════════════
+    // طلبات النقاط: الإنشاء بحد أقصى 50 نقطة وبحالة "معلّق"، والاعتماد للقائد فقط
+    // ═════════════════════════════════════════════════════════════
+
+    match /pendingPoints/{pointId} {
+      allow read: if isLeader() || (
+        isSignedIn() && (
+          resource.data.cubId == request.auth.uid
+          || resource.data.get('parentUid', '') == request.auth.uid
+        )
+      );
+
+      allow create: if isLeader() || validPointRequest(pointId);
+
+      allow update, delete: if isLeader();
+    }
+
+    // ═════════════════════════════════════════════════════════════
+    // بيانات عامة للقراءة، والكتابة للقائد فقط
+    // ═════════════════════════════════════════════════════════════
+
+    match /meetings/{meetingId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isLeader();
+    }
+
+    match /sextets/{sextetId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isLeader();
+    }
+
+    match /sixes/{sixId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isLeader();
+    }
+
+    match /settings/global {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isLeader();
+    }
+
+    match /globalTasks/{taskId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isLeader();
+    }
+
+    match /leaders/{leaderId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isLeader();
+    }
+
+    // بلاغات الحماية: أي مستخدم مسجّل يستطيع الإبلاغ، والقراءة للقائد فقط
+    match /safety_reports/{reportId} {
+      allow read: if isLeader();
+      allow create: if isSignedIn() && request.resource.data.keys().size() <= 12;
+      allow update, delete: if isLeader();
+    }
+
+    // أي مسار غير مذكور أعلاه ممنوع
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Cub Scouts</string>
+    <string name="title_activity_main">Cub Scouts</string>
+    <string name="package_name">com.cubscouts.app</string>
+    <string name="custom_url_scheme">com.cubscouts.app</string>
+</resources>
