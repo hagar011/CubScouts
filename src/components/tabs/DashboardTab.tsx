@@ -143,8 +143,6 @@ interface DashboardTabProps {
   parentRelationships?: ParentCubRelationship[];
   onSelectChild?: (cubId: string) => void;
   onOpenLinkModal?: () => void;
-  /** Optional: lets the Add Cub modal pre-select a sextet. Pass null to clear it. */
-  setAddCubPresetSextetId?: (sextetId: string | null) => void;
 }
 
 export default function DashboardTab({
@@ -181,7 +179,6 @@ export default function DashboardTab({
   parentRelationships = [],
   onSelectChild,
   onOpenLinkModal,
-  setAddCubPresetSextetId,
 }: DashboardTabProps) {
   const [leaderSubTab, setLeaderSubTab] = useState<'roster' | 'approvals' | 'links' | 'security'>('roster');
   const [assignedSextets, setAssignedSextets] = useState<Record<string, string>>({});
@@ -191,6 +188,8 @@ export default function DashboardTab({
   const [levelFilter, setLevelFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [sortBy, setSortBy] = useState<SortKey>('pointsDesc');
+  const [pickerSextetId, setPickerSextetId] = useState<string | null>(null);
+  const [assigningId, setAssigningId] = useState<string | null>(null);
 
   const isLeader = role === UserRole.LEADER;
   const isCub = role === UserRole.CUB;
@@ -328,9 +327,19 @@ export default function DashboardTab({
     setStatusFilter('all');
   };
 
-  const openAddCub = (sextetId: string | null) => {
-    setAddCubPresetSextetId?.(sextetId);
-    setShowAddCubModal(true);
+  const pickerSextet = pickerSextetId
+    ? SEXTETS.find(sx => String(sx.id) === pickerSextetId) || null
+    : null;
+
+  const handleAssignToSextet = async (cub: Cub, sextetId: string) => {
+    setAssigningId(cub.id);
+    try {
+      await onApprovePendingCub(cub.id, cub.name, sextetId);
+    } catch {
+      showToast('تعذر إضافة الشبل إلى السداسي، يرجى إعادة المحاولة.', 'error');
+    } finally {
+      setAssigningId(null);
+    }
   };
 
   const handleView = (cub: Cub) => {
@@ -396,7 +405,7 @@ export default function DashboardTab({
               </div>
               <div className="flex flex-wrap gap-2.5">
                 <button
-                  onClick={() => openAddCub(null)}
+                  onClick={() => setShowAddCubModal(true)}
                   className="px-4 py-2.5 bg-scout-blue hover:bg-blue-800 text-white rounded-xl text-xs font-black transition-colors shadow-sm flex items-center gap-1.5"
                 >
                   <Plus size={14} /> إضافة شبل
@@ -605,10 +614,15 @@ export default function DashboardTab({
                             <h4 className="font-black text-base text-slate-800 truncate">سداسي {g.sex.name}</h4>
                           </div>
                           <button
-                            onClick={() => openAddCub(String(g.sex.id))}
-                            className="px-3 py-2 bg-scout-blue/10 hover:bg-scout-blue hover:text-white text-scout-blue rounded-xl text-[11px] font-black transition-colors flex items-center gap-1 shrink-0"
+                            onClick={() => setPickerSextetId(String(g.sex.id))}
+                            className="px-3 py-2 bg-scout-blue/10 hover:bg-scout-blue hover:text-white text-scout-blue rounded-xl text-[11px] font-black transition-colors flex items-center gap-1.5 shrink-0"
                           >
                             <UserPlus size={14} /> إضافة شبل
+                            {pendingCubsList.length > 0 && (
+                              <span className="bg-rose-500 text-white rounded-full min-w-4 h-4 px-1 text-[9px] flex items-center justify-center">
+                                {pendingCubsList.length}
+                              </span>
+                            )}
                           </button>
                         </div>
                         <div className="grid grid-cols-3 gap-2 text-center">
@@ -769,6 +783,62 @@ export default function DashboardTab({
                 ) : (
                   <p className="text-[11px] text-slate-400 font-bold py-3">لا توجد طلبات انضمام معلقة حاليًا.</p>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* Registered cubs picker (opened from a sextet card) */}
+          {pickerSextet && (
+            <div
+              className="fixed inset-0 z-50 bg-slate-900/50 flex items-end sm:items-center justify-center p-3"
+              onClick={() => setPickerSextetId(null)}
+            >
+              <div
+                role="dialog"
+                aria-modal="true"
+                className="bg-white w-full max-w-lg max-h-[85vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="p-5 border-b border-slate-100 flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h4 className="font-black text-base text-slate-800">إضافة شبل إلى سداسي {pickerSextet.name}</h4>
+                    <p className="text-[11px] text-slate-500 font-bold mt-1">
+                      الأشبال المسجّلون بانتظار الإسناد. اختر الشبل ليُضاف إلى هذا السداسي.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setPickerSextetId(null)}
+                    aria-label="إغلاق"
+                    className="h-8 w-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-500 font-black shrink-0"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div className="p-4 space-y-3 overflow-y-auto">
+                  {pendingCubsList.length > 0 ? (
+                    pendingCubsList.map((cub) => (
+                      <div key={cub.id} className="flex items-center justify-between gap-3 p-3 rounded-2xl border border-slate-200 bg-slate-50 min-w-0">
+                        <div className="min-w-0">
+                          <p className="text-xs font-black text-slate-800 truncate">{cub.name}</p>
+                          <p className="text-[10px] text-slate-500 font-bold truncate">
+                            {cub.email}{cub.phone ? ` • ${cub.phone}` : ''}
+                          </p>
+                        </div>
+                        <button
+                          disabled={assigningId !== null}
+                          onClick={() => handleAssignToSextet(cub, String(pickerSextet.id))}
+                          className="px-3 py-2 bg-scout-blue hover:bg-blue-800 text-white rounded-xl text-[11px] font-black transition-colors disabled:bg-slate-200 disabled:text-slate-400 shrink-0"
+                        >
+                          {assigningId === cub.id ? 'جارٍ الإضافة...' : 'إضافة لهذا السداسي'}
+                        </button>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-[11px] text-slate-400 font-bold text-center py-8">
+                      لا يوجد أشبال مسجّلون بانتظار الإسناد حاليًا.
+                    </p>
+                  )}
+                </div>
               </div>
             </div>
           )}
