@@ -72,7 +72,7 @@ const LeaderboardTab = lazy(() => import('./components/tabs/LeaderboardTab'));
 const LawTab = lazy(() => import('./components/tabs/LawTab'));
 const MeetingsTab = lazy(() => import('./components/tabs/MeetingsTab'));
 const SafeFromHarmTab = lazy(() => import('./components/tabs/SafeFromHarmTab'));
-
+const SdgHeroesTab = React.lazy(() => import('./components/tabs/SdgHeroesTab'));
 const TreasureAdventureMap = lazy(() => import('./components/TreasureAdventureMap'));
 const MonthlyReportModal = lazy(() =>
   import('./components/MonthlyReportModal').then((m) => ({ default: m.MonthlyReportModal }))
@@ -135,7 +135,7 @@ function AppInner() {
 
   // ── UI State ────────────────────────────────────────────────────────────────
   const [view, setView] = useState<
-    'dashboard' | 'evaluate' | 'game' | 'progress' | 'law' | 'badges' | 'meetings' | 'safeFromHarm' | 'leaderboard' | 'activities'
+    'dashboard' | 'evaluate' | 'game' | 'progress' | 'law' | 'badges' | 'meetings' | 'safeFromHarm' | 'leaderboard' | 'sdgHeroes' | 'activities'
   >('dashboard');
 
   const [isDarkMode, setIsDarkMode] = useState(() => {
@@ -1370,6 +1370,14 @@ function AppInner() {
                     showToast={showToast}
                   />
                 )}
+                {view === 'sdgHeroes' && (
+                  <SdgHeroesTab
+                    role={role}
+                    activeCub={activeCub}
+                    onAddPoints={async (cubId, pts) => addPointsToCub(cubId, pts)}
+                    showToast={showToast}
+                  />
+                )}
                 {view === 'law' && <LawTab />}
                 {view === 'meetings' && (
                   <MeetingsTab
@@ -1396,6 +1404,7 @@ function AppInner() {
             { id: 'badges',      icon: <Star size={24} />,        label: 'الأوسمة' },
             { id: 'leaderboard', icon: <Trophy size={24} />,      label: 'المتصدرين' },
             { id: 'safeFromHarm',icon: <ShieldCheck size={24} />, label: 'الحماية' },
+            { id: 'sdgHeroes', icon: <span className="text-xl">🌱</span>, label: 'أبطال التنمية المستدامة' },
             { id: 'law',         icon: <MapIcon size={24} />,     label: 'القانون' },
           ].map((item) => (
             <button
