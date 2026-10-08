@@ -3,8 +3,8 @@
  */
 
 export const ALLOWED_LEADER_EMAILS = [
-  'scout2026@gmail.com',
   'hagar01124@gmail.com',
+  'elzohorscoutgroup@gmail.com',
 ];
 
 /**

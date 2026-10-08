@@ -109,6 +109,38 @@ function CubCard({ cub, sextetName, maxPoints, onView, onEvaluate, onDelete }: C
   );
 }
 
+interface AssignToSextetRowProps {
+  options: { id: string; name: string }[];
+  disabled: boolean;
+  busy: boolean;
+  onAssign: (sextetId: string) => void;
+}
+
+function AssignToSextetRow({ options, disabled, busy, onAssign }: AssignToSextetRowProps) {
+  const [selected, setSelected] = useState('');
+  return (
+    <div className="flex flex-wrap items-center gap-2 bg-white rounded-xl border border-scout-blue/20 p-3">
+      <select
+        value={selected}
+        onChange={(e) => setSelected(e.target.value)}
+        className="flex-1 min-w-[130px] bg-slate-50 border border-slate-200 rounded-lg py-2 px-3 text-[11px] font-bold outline-none"
+      >
+        <option value="">-- اختر السداسي --</option>
+        {options.map((o) => (
+          <option key={o.id} value={o.id}>سداسي {o.name}</option>
+        ))}
+      </select>
+      <button
+        disabled={!selected || disabled}
+        onClick={() => onAssign(selected)}
+        className="px-3 py-2 bg-scout-blue hover:bg-blue-800 text-white rounded-lg text-[11px] font-black transition-colors disabled:bg-slate-200 disabled:text-slate-400 flex items-center gap-1 shrink-0"
+      >
+        <UserPlus size={13} /> {busy ? 'جارٍ الإضافة...' : 'إضافة إلى سداسي'}
+      </button>
+    </div>
+  );
+}
+
 interface DashboardTabProps {
   role: UserRole;
   currentUser: FirebaseUser | null;
@@ -307,6 +339,17 @@ export default function DashboardTab({
     () => visibleCubs.filter(c => !SEXTETS.some(s => String(s.id) === String(c.sextetId || ''))),
     [visibleCubs]
   );
+
+  const sextetOptions = useMemo(
+    () => SEXTETS.map(sx => ({ id: String(sx.id), name: String(sx.name) })),
+    []
+  );
+
+  // Registered cubs still waiting for a sextet (shown in the "no sextet" card)
+  const pendingUnassigned = useMemo(() => {
+    if (sextetFilter !== 'all' || levelFilter !== 'all' || statusFilter !== 'all') return [];
+    return pendingCubsList.filter(c => !query || String(c.name || '').toLowerCase().includes(query));
+  }, [pendingCubsList, query, sextetFilter, levelFilter, statusFilter]);
 
   const attention = useMemo(() => {
     const pendingIds = new Set(pendingPointsList.map(p => p.cubId));
@@ -669,22 +712,55 @@ export default function DashboardTab({
                     </div>
                   ))}
 
-                {unassigned.length > 0 && (
+                {(unassigned.length > 0 || pendingUnassigned.length > 0) && (
                   <div className="bg-white rounded-3xl border border-slate-200 shadow-[0_12px_28px_rgba(15,23,42,0.05)] overflow-hidden min-w-0">
                     <div className="p-5 border-b border-slate-100">
-                      <h4 className="font-black text-base text-slate-800">أشبال بدون سداسي ({unassigned.length})</h4>
+                      <h4 className="font-black text-base text-slate-800">
+                        أشبال بدون سداسي ({unassigned.length + pendingUnassigned.length})
+                      </h4>
+                      <p className="text-[11px] text-slate-500 font-bold mt-1">
+                        اختر السداسي لكل شبل ثم اضغط "إضافة إلى سداسي".
+                      </p>
                     </div>
                     <div className="p-4 space-y-3 bg-slate-50/50">
+                      {pendingUnassigned.map((cub) => (
+                        <div key={cub.id} className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3 min-w-0">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="min-w-0">
+                              <h5 className="font-black text-sm text-slate-800 truncate">{cub.name}</h5>
+                              <p className="text-[11px] text-slate-500 font-bold truncate">
+                                {cub.email}{cub.phone ? ` • ${cub.phone}` : ''}
+                              </p>
+                            </div>
+                            <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 text-[10px] font-black shrink-0">
+                              مسجّل بانتظار الإسناد
+                            </span>
+                          </div>
+                          <AssignToSextetRow
+                            options={sextetOptions}
+                            disabled={assigningId !== null}
+                            busy={assigningId === cub.id}
+                            onAssign={(sextetId) => handleAssignToSextet(cub, sextetId)}
+                          />
+                        </div>
+                      ))}
                       {unassigned.map((cub) => (
-                        <CubCard
-                          key={cub.id}
-                          cub={cub}
-                          sextetName="غير محدد"
-                          maxPoints={maxPoints}
-                          onView={() => handleView(cub)}
-                          onEvaluate={() => handleEvaluate(cub)}
-                          onDelete={() => handleDeleteCub(cub)}
-                        />
+                        <div key={cub.id} className="space-y-2">
+                          <CubCard
+                            cub={cub}
+                            sextetName="غير محدد"
+                            maxPoints={maxPoints}
+                            onView={() => handleView(cub)}
+                            onEvaluate={() => handleEvaluate(cub)}
+                            onDelete={() => handleDeleteCub(cub)}
+                          />
+                          <AssignToSextetRow
+                            options={sextetOptions}
+                            disabled={assigningId !== null}
+                            busy={assigningId === cub.id}
+                            onAssign={(sextetId) => handleAssignToSextet(cub, sextetId)}
+                          />
+                        </div>
                       ))}
                     </div>
                   </div>
