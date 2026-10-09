@@ -12,6 +12,12 @@ import { SEXTETS } from '../../constants/initialData';
 import { SECRET_MISSION } from '../../constants/scoutData';
 import { User as FirebaseUser } from 'firebase/auth';
 
+/** أسماء السداسيات عندكم تبدأ بكلمة "سداسي" (مثل: سداسي الأسد)، فلا نكررها. */
+function sextetTitle(name: string): string {
+  const n = String(name).trim();
+  return n.startsWith('سداسي') ? n : `سداسي ${n}`;
+}
+
 type SortKey = 'pointsDesc' | 'pointsAsc' | 'name';
 
 const STATUS_LABELS: Record<string, string> = {
@@ -69,7 +75,7 @@ function CubCard({ cub, sextetName, maxPoints, onView, onEvaluate, onDelete }: C
       <div className="flex items-center justify-between text-[11px] font-bold text-slate-500">
         <span className="flex items-center gap-1 min-w-0">
           <Tent size={12} className="shrink-0" />
-          <span className="truncate">سداسي {sextetName}</span>
+          <span className="truncate">{sextetTitle(sextetName)}</span>
         </span>
         <span className="flex items-center gap-1 text-amber-700 font-black shrink-0">
           <Star size={12} /> {points} نقطة
@@ -127,7 +133,7 @@ function AssignToSextetRow({ options, disabled, busy, onAssign }: AssignToSextet
       >
         <option value="">-- اختر السداسي --</option>
         {options.map((o) => (
-          <option key={o.id} value={o.id}>سداسي {o.name}</option>
+          <option key={o.id} value={o.id}>{sextetTitle(o.name)}</option>
         ))}
       </select>
       <button
@@ -156,6 +162,8 @@ interface DashboardTabProps {
   onWeeklyEvaluation: (id: string) => Promise<void>;
   onSaveMonthlyReport: (id: string) => Promise<void>;
   onApprovePendingCub: (cubId: string, name: string, selectedSextetId: string) => Promise<void>;
+  /** Assigns an already-registered cub (no sextet yet) to a sextet. */
+  onAssignCubToSextet: (cubId: string, sextetId: string) => Promise<void>;
   onRejectPendingCub: (cubId: string, name: string) => Promise<void>;
   onApproveUser: (uid: string) => Promise<void>;
   onRejectUser: (uid: string) => Promise<void>;
@@ -192,6 +200,7 @@ export default function DashboardTab({
   onWeeklyEvaluation,
   onSaveMonthlyReport,
   onApprovePendingCub,
+  onAssignCubToSextet,
   onRejectPendingCub,
   onApproveUser,
   onRejectUser,
@@ -234,7 +243,7 @@ export default function DashboardTab({
   const stats = useMemo(() => {
     const totalCubs = cubs.filter(c => c.status !== 'pending').length;
 
-    const totalSextets = sextets.length;
+    const totalSextets = SEXTETS.length;
 
     const approvedCubs = cubs.filter(c => c.status !== 'pending');
 
@@ -256,13 +265,14 @@ export default function DashboardTab({
         : null;
 
     const topSextet =
-      sextets.length > 0
-        ? [...sextets].sort(
-          (a, b) =>
-            (b.totalPoints || b.points || 0) -
-            (a.totalPoints || a.points || 0)
-        )[0]
-        : null;
+      SEXTETS.map(sx => ({
+        name: String(sx.name),
+        totalPoints: approvedCubs
+          .filter(c => String(c.sextetId || '') === String(sx.id))
+          .reduce((acc, c) => acc + (c.points || 0), 0),
+      }))
+        .sort((a, b) => b.totalPoints - a.totalPoints)
+        .find(g => g.totalPoints > 0) || null;
 
     return {
       totalCubs,
@@ -272,7 +282,7 @@ export default function DashboardTab({
       topCub,
       topSextet,
     };
-  }, [cubs, sextets]);
+  }, [cubs]);
 
   const activeCubs = useMemo(() => cubs.filter(c => c.status !== 'pending'), [cubs]);
 
@@ -288,7 +298,7 @@ export default function DashboardTab({
   );
 
   const levelOptions = useMemo(
-    () => Array.from(new Set(activeCubs.map(c => c.level).filter((l): l is string => Boolean(l)))),
+    () => Array.from(new Set(activeCubs.map(c => String(c.level || '')).filter(Boolean))),
     [activeCubs]
   );
   const statusOptions = useMemo(
@@ -335,6 +345,15 @@ export default function DashboardTab({
     [activeCubs, visibleCubs]
   );
 
+  const unassignedAll = useMemo(
+    () => activeCubs.filter(c => !SEXTETS.some(s => String(s.id) === String(c.sextetId || ''))),
+    [activeCubs]
+  );
+  const pickerCandidates = useMemo(
+    () => [...pendingCubsList, ...unassignedAll],
+    [pendingCubsList, unassignedAll]
+  );
+
   const unassigned = useMemo(
     () => visibleCubs.filter(c => !SEXTETS.some(s => String(s.id) === String(c.sextetId || ''))),
     [visibleCubs]
@@ -377,7 +396,11 @@ export default function DashboardTab({
   const handleAssignToSextet = async (cub: Cub, sextetId: string) => {
     setAssigningId(cub.id);
     try {
-      await onApprovePendingCub(cub.id, cub.name, sextetId);
+      if (cub.status === 'pending') {
+        await onApprovePendingCub(cub.id, cub.name, sextetId);
+      } else {
+        await onAssignCubToSextet(cub.id, sextetId);
+      }
     } catch {
       showToast('تعذر إضافة الشبل إلى السداسي، يرجى إعادة المحاولة.', 'error');
     } finally {
@@ -385,9 +408,10 @@ export default function DashboardTab({
     }
   };
 
+  // App.tsx has no 'progress' screen, so the cub file opens in the evaluate tab (cub preselected).
   const handleView = (cub: Cub) => {
     onSelectCub(cub.id);
-    setView('progress');
+    setView('evaluate');
   };
 
   const handleEvaluate = (cub: Cub) => {
@@ -395,9 +419,9 @@ export default function DashboardTab({
     setView('evaluate');
   };
 
-  const handleDeleteCub = async (cub: Cub) => {
-    const ok = await showConfirm(`هل تريد بالتأكيد حذف الشبل "${cub.name}" وسحب كامل سجلاته؟`);
-    if (ok) onDeleteCub(cub.id);
+  // App.tsx opens its own DeleteConfirmModal from onDeleteCub, so no extra confirm here.
+  const handleDeleteCub = (cub: Cub) => {
+    onDeleteCub(cub.id);
   };
 
   const handleParentDeedSubmit = async (taskName: string) => {
@@ -486,7 +510,7 @@ export default function DashboardTab({
               { label: 'إجمالي السداسيات', value: String(stats.totalSextets), desc: 'سداسيات الفرقة', icon: <Tent size={18} />, tone: 'bg-scout-green/10 text-scout-green' },
               { label: 'إجمالي النقاط', value: String(stats.totalPoints), desc: 'مجموع نقاط الأشبال', icon: <Flame size={18} />, tone: 'bg-amber-100 text-amber-700' },
               { label: 'أفضل شبل', value: stats.topCub ? stats.topCub.name : 'لا يوجد', desc: stats.topCub ? `${stats.topCub.points || 0} نقطة` : 'لم يبدأ التقييم بعد', icon: <Trophy size={18} />, tone: 'bg-scout-yellow/20 text-amber-700' },
-              { label: 'أفضل سداسي', value: stats.topSextet ? stats.topSextet.name : 'لا يوجد', desc: stats.topSextet ? `${stats.topSextet.totalPoints || stats.topSextet.points || 0} نقطة` : 'لا توجد نقاط بعد', icon: <Compass size={18} />, tone: 'bg-scout-blue/10 text-scout-blue' },
+              { label: 'أفضل سداسي', value: stats.topSextet ? stats.topSextet.name : 'لا يوجد', desc: stats.topSextet ? `${stats.topSextet.totalPoints} نقطة` : 'لا توجد نقاط بعد', icon: <Compass size={18} />, tone: 'bg-scout-blue/10 text-scout-blue' },
               { label: 'متوسط النقاط', value: String(stats.avgScore), desc: 'لكل شبل', icon: <BarChart3 size={18} />, tone: 'bg-scout-green/10 text-scout-green' },
               { label: 'الطلبات المعلقة', value: String(pendingTotal), desc: 'بانتظار قرارك', icon: <Clock size={18} />, tone: pendingTotal > 0 ? 'bg-rose-100 text-rose-600' : 'bg-slate-100 text-slate-500' },
             ].map((st) => (
@@ -586,7 +610,7 @@ export default function DashboardTab({
                     >
                       <option value="all">الكل</option>
                       {SEXTETS.map((s) => (
-                        <option key={s.id} value={String(s.id)}>سداسي {s.name}</option>
+                        <option key={s.id} value={String(s.id)}>{sextetTitle(s.name)}</option>
                       ))}
                     </select>
                   </label>
@@ -654,16 +678,16 @@ export default function DashboardTab({
                             <span className={`w-10 h-10 rounded-2xl ${g.sex.color} flex items-center justify-center text-white shrink-0`}>
                               <Tent size={20} />
                             </span>
-                            <h4 className="font-black text-base text-slate-800 truncate">سداسي {g.sex.name}</h4>
+                            <h4 className="font-black text-base text-slate-800 truncate">{sextetTitle(g.sex.name)}</h4>
                           </div>
                           <button
                             onClick={() => setPickerSextetId(String(g.sex.id))}
                             className="px-3 py-2 bg-scout-blue/10 hover:bg-scout-blue hover:text-white text-scout-blue rounded-xl text-[11px] font-black transition-colors flex items-center gap-1.5 shrink-0"
                           >
                             <UserPlus size={14} /> إضافة شبل
-                            {pendingCubsList.length > 0 && (
+                            {pickerCandidates.length > 0 && (
                               <span className="bg-rose-500 text-white rounded-full min-w-4 h-4 px-1 text-[9px] flex items-center justify-center">
-                                {pendingCubsList.length}
+                                {pickerCandidates.length}
                               </span>
                             )}
                           </button>
@@ -835,7 +859,7 @@ export default function DashboardTab({
                             >
                               <option value="">-- حدد السداسي --</option>
                               {SEXTETS.map((s) => (
-                                <option key={s.id} value={s.id}>سداسي {s.name}</option>
+                                <option key={s.id} value={s.id}>{sextetTitle(s.name)}</option>
                               ))}
                             </select>
                             <button
@@ -877,9 +901,9 @@ export default function DashboardTab({
               >
                 <div className="p-5 border-b border-slate-100 flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <h4 className="font-black text-base text-slate-800">إضافة شبل إلى سداسي {pickerSextet.name}</h4>
+                    <h4 className="font-black text-base text-slate-800">إضافة شبل إلى {sextetTitle(pickerSextet.name)}</h4>
                     <p className="text-[11px] text-slate-500 font-bold mt-1">
-                      الأشبال المسجّلون بانتظار الإسناد. اختر الشبل ليُضاف إلى هذا السداسي.
+                      الأشبال المسجّلون الذين لم يُحدَّد لهم سداسي. اختر الشبل ليُضاف إلى هذا السداسي.
                     </p>
                   </div>
                   <button
@@ -891,13 +915,13 @@ export default function DashboardTab({
                   </button>
                 </div>
                 <div className="p-4 space-y-3 overflow-y-auto">
-                  {pendingCubsList.length > 0 ? (
-                    pendingCubsList.map((cub) => (
+                  {pickerCandidates.length > 0 ? (
+                    pickerCandidates.map((cub) => (
                       <div key={cub.id} className="flex items-center justify-between gap-3 p-3 rounded-2xl border border-slate-200 bg-slate-50 min-w-0">
                         <div className="min-w-0">
                           <p className="text-xs font-black text-slate-800 truncate">{cub.name}</p>
                           <p className="text-[10px] text-slate-500 font-bold truncate">
-                            {cub.email}{cub.phone ? ` • ${cub.phone}` : ''}
+                            {cub.email || 'بدون بريد'}{cub.phone ? ` • ${cub.phone}` : ''}
                           </p>
                         </div>
                         <button
@@ -911,7 +935,7 @@ export default function DashboardTab({
                     ))
                   ) : (
                     <p className="text-[11px] text-slate-400 font-bold text-center py-8">
-                      لا يوجد أشبال مسجّلون بانتظار الإسناد حاليًا.
+                      لا يوجد أشبال مسجّلون بدون سداسي حاليًا.
                     </p>
                   )}
                 </div>
