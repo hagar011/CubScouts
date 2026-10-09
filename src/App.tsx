@@ -1005,6 +1005,16 @@ function AppInner() {
     showToast(`✅ تمت الموافقة على ${name}!`, 'success');
   };
 
+  // يُسند شبلًا مسجّلًا (بدون سداسي) إلى سداسي، بنفس طريقة الكتابة في cubs و scouts المستخدمة في updateEvaluation
+  const handleAssignCubToSextet = async (cubId: string, selectedSextetId: string) => {
+    if (!selectedSextetId) { showToast('يرجى تحديد السداسي أولاً!', 'warning'); return; }
+    const cub = cubs.find((c) => c.id === cubId);
+    const sextetName = sextets.find((s) => s.id === selectedSextetId)?.name || '';
+    await setDoc(doc(db, 'cubs', cubId), { sextetId: selectedSextetId, updatedAt: new Date().toISOString() }, { merge: true });
+    await setDoc(doc(db, 'scouts', cubId), { sextetId: selectedSextetId }, { merge: true });
+    showToast(`✅ تمت إضافة ${cub?.name || 'الشبل'} إلى ${sextetName || 'السداسي'}`, 'success');
+  };
+
   const handleRejectPendingCub = async (cubId: string, name: string) => {
     const ok = await showConfirm(`هل تريد رفض طلب الشبل "${name}"؟`);
     if (!ok) return;
@@ -1313,6 +1323,7 @@ function AppInner() {
                     onWeeklyEvaluation={handleWeeklyEvaluation}
                     onSaveMonthlyReport={saveMonthlyReport}
                     onApprovePendingCub={handleApprovePendingCub}
+                    onAssignCubToSextet={handleAssignCubToSextet}
                     onRejectPendingCub={handleRejectPendingCub}
                     onApproveUser={handleApproveUser}
                     onRejectUser={handleRejectUser}
@@ -1340,6 +1351,7 @@ function AppInner() {
                     onUpdateEvaluation={updateEvaluation}
                     showToast={showToast}
                     setView={setView}
+                    initialCubId={activeCubId || undefined}
                   />
                 )}
                 {view === 'activities' && (
