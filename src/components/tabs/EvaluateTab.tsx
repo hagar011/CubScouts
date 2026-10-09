@@ -13,10 +13,12 @@ interface EvaluateTabProps {
   ) => Promise<void>;
   showToast: (msg: string, type?: 'success' | 'error' | 'warning' | 'info') => void;
   setView: (view: any) => void;
+  /** اختياري: شبل محدد مسبقًا (يأتي من أزرار لوحة القائد). */
+  initialCubId?: string;
 }
 
-export default function EvaluateTab({ cubs, onUpdateEvaluation, showToast, setView }: EvaluateTabProps) {
-  const [selectedCubId, setSelectedCubId] = useState('');
+export default function EvaluateTab({ cubs, onUpdateEvaluation, showToast, setView, initialCubId }: EvaluateTabProps) {
+  const [selectedCubId, setSelectedCubId] = useState(initialCubId || '');
   const [evaluationDate, setEvaluationDate] = useState(new Date().toISOString().split('T')[0]);
   const [activeSubTab, setActiveSubTab] = useState<'curriculum' | 'conduct'>('curriculum');
   const [searchQuery, setSearchQuery] = useState('');
